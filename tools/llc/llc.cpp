@@ -267,6 +267,10 @@ SegmentedStacks("segmented-stacks",
   cl::desc("Use segmented stacks if possible."),
   cl::init(false));
 
+static cl::opt<bool>
+HiPEPrologue("hipe-prologue",
+  cl::desc("Use HiPE custom prologue."),
+  cl::init(false));
 
 // GetFileNameRoot - Helper function to get the basename of a filename.
 static inline std::string
@@ -468,6 +472,7 @@ int main(int argc, char **argv) {
   Options.DisableJumpTables = DisableSwitchTables;
   Options.TrapFuncName = TrapFuncName;
   Options.EnableSegmentedStacks = SegmentedStacks;
+  Options.EnableHiPEPrologue = HiPEPrologue;
 
   std::auto_ptr<TargetMachine>
     target(TheTarget->createTargetMachine(TheTriple.getTriple(),

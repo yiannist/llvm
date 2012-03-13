@@ -42,8 +42,8 @@ namespace llvm {
           GuaranteedTailCallOpt(false), DisableTailCalls(false),
           StackAlignmentOverride(0), RealignStack(true),
           DisableJumpTables(false), EnableFastISel(false),
-          EnableSegmentedStacks(false), TrapFuncName(""),
-          FloatABIType(FloatABI::Default)
+          EnableSegmentedStacks(false), EnableHiPEPrologue(false),
+          TrapFuncName(""), FloatABIType(FloatABI::Default)
     {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
@@ -165,6 +165,11 @@ namespace llvm {
     unsigned EnableFastISel : 1;
 
     unsigned EnableSegmentedStacks : 1;
+
+    /// EnableHiPEPrologue - This flag indicates that the PrologEpilogInserter
+    /// should adjust a function's prologue by adding "inc_stack_0" call to go
+    /// with HiPE ABI.
+    unsigned EnableHiPEPrologue : 1;
 
     /// getTrapFunctionName - If this returns a non-empty string, this means
     /// isel should lower Intrinsic::trap to a call to the specified function
