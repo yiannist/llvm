@@ -1337,11 +1337,17 @@ HasNestArgument(const MachineFunction *MF) {
 /// either one or two registers will be needed. Set primary to true for
 /// the first register, false for the second.
 static unsigned
-GetScratchRegister(bool Is64Bit, const MachineFunction &MF, bool Primary) {
+GetScratchRegister(bool Is64Bit, const MachineFunction &MF, bool Primary=true) {
+  CallingConv::ID CallingConvention = MF.getFunction()->getCallingConv();
+
+  if (CallingConvention == CallingConv::HiPE) {
+    // R14/EBX is a temp register, not used in HiPE Calling Convention.
+    return (Is64Bit ? X86::R14 : X86::EBX);
+  }
+
   if (Is64Bit)
     return Primary ? X86::R11 : X86::R12;
 
-  CallingConv::ID CallingConvention = MF.getFunction()->getCallingConv();
   bool IsNested = HasNestArgument(&MF);
 
   if (CallingConvention == CallingConv::X86_FastCall ||
@@ -1544,6 +1550,112 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
   checkMBB->addSuccessor(allocMBB);
   checkMBB->addSuccessor(&prologueMBB);
 
+#ifdef XDEBUG
+  MF.verify();
+#endif
+}
+
+
+// Erlang programs may need a special prologue to handle the stack size they
+// might need at runtime. That is because Erlang/OTP does not implement a C
+// stack but uses a custom implementation of hybrid stack/heap
+// architecture. (for more information see Eric Stenman's Ph.D. thesis:
+// http://publications.uu.se/uu/fulltext/nbn_se_uu_diva-2688.pdf)
+//
+// Entry:
+//
+// CheckStack:
+//    temp0 = sp - MaxStack
+//    if( temp0 < SP_LIMIT(P) ) goto IncStack else goto NewEntry
+// IncStack:
+//    call inc_stack   # doubles the stack space
+//    goto CheckStack
+// OldEntry:
+//    ...
+void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
+  MachineBasicBlock &prologueMBB = MF.front();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  const X86InstrInfo &TII = *TM.getInstrInfo();
+  bool Is64Bit = STI.is64Bit();
+  unsigned MaxStack = MFI->getStackSize();
+  unsigned WordSize = TM.getTargetData()->getPointerSize();
+  unsigned ScratchReg, SPReg, PReg, SPLimOffset;
+  unsigned LEAop, CMPop, CALLop;
+  // HiPE-specific values
+  unsigned HipeLeafWords = 24;
+  unsigned Guaranteed = HipeLeafWords * WordSize;
+  DebugLoc DL;
+  const X86Subtarget *ST = &MF.getTarget().getSubtarget<X86Subtarget>();
+
+  if (!ST->isTargetLinux())
+    report_fatal_error("HiPE prologue not supported on this platform.");
+
+  if (MF.getFunction()->getCallingConv() == CallingConv::HiPE) {
+
+    if (MFI->hasCalls())
+      MaxStack += (HipeLeafWords + 2) * WordSize;
+
+    if (MFI->hasCalls() && MaxStack > Guaranteed) {
+      MachineBasicBlock *stackCheckMBB = MF.CreateMachineBasicBlock();
+      MachineBasicBlock *incStackMBB = MF.CreateMachineBasicBlock();
+      // Having StackCheckMBB as the entry block is not possible. We need to
+      // jumping back to the stack check block, in order to re-check that the
+      // new stack size (stack was doubled by inc_stack_0) is enough, and it
+      // being the entry block makes this illegal. Thus, we create a new Entry
+      // Block that falls to StackCheckMBB.
+      MachineBasicBlock *newEntryMBB = MF.CreateMachineBasicBlock();
+
+      for (MachineBasicBlock::livein_iterator i = prologueMBB.livein_begin(),
+             e = prologueMBB.livein_end(); i != e; i++) {
+        incStackMBB->addLiveIn(*i);
+        stackCheckMBB->addLiveIn(*i);
+        newEntryMBB->addLiveIn(*i);
+      }
+
+      MF.push_front(incStackMBB);
+      MF.push_front(stackCheckMBB);
+      MF.push_front(newEntryMBB);
+
+      if(Is64Bit) {
+        SPReg = X86::RSP;
+        PReg  = X86::RBP;
+        LEAop = X86::LEA64r;
+        CMPop = X86::CMP64rm;
+        CALLop = X86::CALL64pcrel32;
+        SPLimOffset = 0x48;
+      } else {
+        SPReg = X86::ESP;
+        PReg  = X86::EBP;
+        LEAop = X86::LEA32r;
+        CMPop = X86::CMP32rm;
+        CALLop = X86::CALLpcrel32;
+        SPLimOffset = 0x24;
+      }
+
+      ScratchReg = GetScratchRegister(Is64Bit, MF);
+      assert(!MF.getRegInfo().isLiveIn(ScratchReg) &&
+             "HiPE prologue scratch register is live-in");
+
+      // Create new MBB for stack check:
+      addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(LEAop), ScratchReg),
+                   SPReg, false, -MaxStack);
+      // SPLimOffset is in a fixed heap location (pointed by BP).
+      addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(CMPop))
+                   .addReg(ScratchReg), PReg, false, SPLimOffset);
+      BuildMI(stackCheckMBB, DL, TII.get(X86::JAE_4)).addMBB(&prologueMBB);
+
+      // Create new MBB for inc_stack:
+      BuildMI(incStackMBB, DL, TII.get(CALLop)).
+        addExternalSymbol("inc_stack_0");
+      BuildMI(incStackMBB, DL, TII.get(X86::JMP_4)).addMBB(stackCheckMBB);
+
+      stackCheckMBB->addSuccessor(&prologueMBB, 99);
+      stackCheckMBB->addSuccessor(incStackMBB, 1);
+
+      incStackMBB->addSuccessor(stackCheckMBB);
+      newEntryMBB->addSuccessor(stackCheckMBB);
+    }
+  }
 #ifdef XDEBUG
   MF.verify();
 #endif
