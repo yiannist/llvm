@@ -29,6 +29,7 @@
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/Erlang.h" // For some predefined constants (for prologue)
 
 using namespace llvm;
 
@@ -1533,6 +1534,117 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
   checkMBB->addSuccessor(allocMBB);
   checkMBB->addSuccessor(&prologueMBB);
 
+#ifdef XDEBUG
+  MF.verify();
+#endif
+}
+
+// Erlang programs may need a special prologue to handle the stack size they
+// might need. That is because Erlang/OTP does not implement a C stack but
+// uses a custom implementation of hybrid stack/heap architecture. (for more
+// information see Eric Stenman's Ph.D. thesis:
+// http://publications.uu.se/uu/fulltext/nbn_se_uu_diva-2688.pdf)
+//
+// Entry:
+//
+// CheckStack:
+//    temp0 = sp - MaxStack
+//    if( temp0 < SP_LIMIT(P) ) goto IncStack else goto NewEntry
+// IncStack:
+//    call inc_stack
+//    goto NewStart
+// NewEntry:
+//    push %rbp
+//    ...
+void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
+  MachineBasicBlock &MBB = MF.front(); // Prologue goes in entry BB.
+  MachineBasicBlock::iterator MBBI = MBB.begin();
+  MachineFrameInfo *MFI = MF.getFrameInfo();
+  const Function *Fn = MF.getFunction();
+  const X86InstrInfo &TII = *TM.getInstrInfo();
+  uint64_t StackSize = MFI->getStackSize();    // Number of bytes to allocate.
+  bool Is64Bit = STI.is64Bit();
+  MachineFunction::iterator MBBIter = MBB;     // Needed for adding HiPE
+                                               // prologue MBBs.
+  ++MBBIter;
+
+  DebugLoc DL;
+
+  if (Fn->getCallingConv() == CallingConv::HiPE) {
+    const unsigned StkArity = computeStkArity(Fn->arg_size(), Is64Bit);
+    const unsigned WordSz = WordSize(Is64Bit);
+    const unsigned Guaranteed = (LeafWords - 1 - StkArity) * WordSz;
+    const unsigned MaxStack = StackSize + LeafWords * WordSz -
+      MFI->getMaxCallFrameSize();
+
+    if (MaxStack > Guaranteed) {
+      /// First update the CFG
+      MachineBasicBlock *entryMBB = &MBB;
+      MachineBasicBlock *stackCheckMBB = MF.CreateMachineBasicBlock();
+      MachineBasicBlock *incStackMBB = MF.CreateMachineBasicBlock();
+      MachineBasicBlock *newEntry = MF.CreateMachineBasicBlock();
+
+      // Insert new blocks in current function's MachineBasicBlock iterator.
+      MF.insert(MBBIter, stackCheckMBB);
+      MF.insert(MBBIter, incStackMBB);
+      MF.insert(MBBIter, newEntry);
+
+      // Move BB from Entry to newEntry.
+      // (The first BB of every llvm function should begin with the Entry label
+      // and no jumps to that block are allowed.)
+      newEntry->splice(newEntry->begin(), entryMBB, entryMBB->begin(),
+                       entryMBB->end());
+
+      // Update the successors and PHI nodes of all MBBs that are created or
+      // changed.
+      newEntry->transferSuccessorsAndUpdatePHIs(entryMBB);
+
+      // Entry falls through StackCheck
+      entryMBB->addSuccessor(stackCheckMBB);
+
+      // StackCheck falls through IncStack or jumps to NewEntry
+      stackCheckMBB->addSuccessor(incStackMBB);
+      stackCheckMBB->addSuccessor(newEntry);
+
+      // IncStack jumps to StackCheck
+      incStackMBB->addSuccessor(stackCheckMBB);
+
+      // Create new Machine Basic Block for inc_stack check (stackCheckMBB)
+      MachineBasicBlock::iterator stackCheckMBBI = stackCheckMBB->begin();
+      // Registers to use for the instructions:
+      const unsigned TempReg = Is64Bit ? X86::R14 : X86::EBX; // a temp register (temp0) not involved in Erlang CC
+      const unsigned StackPtrReg = Is64Bit ? X86::RSP : X86::ESP;
+      const unsigned ProcessPtrReg = Is64Bit ? X86::RBP : X86::EBP;
+      // lea -MaxStack(%rsp), %r14
+      unsigned Opc1 = Is64Bit ? X86::LEA64r : X86::LEA32r;
+      addRegOffset(BuildMI(*stackCheckMBB, stackCheckMBBI, DL, TII.get(Opc1),
+			   TempReg), StackPtrReg, false, -MaxStack);
+      // cmp SP_LIMIT(P), %r14
+      unsigned int Opc2 = Is64Bit ? X86::CMP64rm : X86::CMP32rm;
+      const unsigned SPLimitOff = Is64Bit ? 0x48 : 0x24; // Hardcoded in Erlang/OTP
+      addRegOffset(BuildMI(*stackCheckMBB, stackCheckMBBI, DL, TII.get(Opc2),
+			   TempReg), ProcessPtrReg, false, SPLimitOff);
+      // jae NewEntry
+      BuildMI(*stackCheckMBB, stackCheckMBBI, DL,
+	      TII.get(X86::JAE_4)).addMBB(newEntry);
+
+      // Create new MBB for inc_stack (IncStack)
+      MachineBasicBlock::iterator incStackMBBI = incStackMBB->begin();
+      // call inc_stack_0
+      unsigned CallOp = Is64Bit ? X86::CALL64pcrel32 : X86::CALLpcrel32;
+      BuildMI(*incStackMBB, incStackMBBI, DL,
+              TII.get(CallOp)).addExternalSymbol("inc_stack_0");
+      // jmp CheckStack
+      BuildMI(*incStackMBB, incStackMBBI, DL,
+	      TII.get(X86::JMP_4)).addMBB(stackCheckMBB);
+
+      //DEBUG:
+      // for (MachineFunction::iterator i = MF.begin(), e = MF.end(); i != e; ++i)
+      //     errs() << "Basic block (name=" << i->getName() << ") has "
+      // 	     << i->size() << " instructions.\n" << *i << "\n";
+      // errs() << "\n\n";
+    }
+  }
 #ifdef XDEBUG
   MF.verify();
 #endif

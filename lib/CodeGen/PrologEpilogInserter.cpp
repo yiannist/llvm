@@ -703,6 +703,11 @@ void PEI::insertPrologEpilogCode(MachineFunction &Fn) {
   // space in small chunks instead of one large contiguous block.
   if (Fn.getTarget().Options.EnableSegmentedStacks)
     TFI.adjustForSegmentedStacks(Fn);
+
+  // Emit additional code that is required to support Erlang HiPE native code,
+  // if we've been asked for it.
+  if (Fn.getTarget().Options.EnableHiPEPrologue)
+    TFI.adjustForHiPEPrologue(Fn);
 }
 
 /// replaceFrameIndices - Replace all MO_FrameIndex operands with physical
