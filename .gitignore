@@ -33,10 +33,39 @@ autoconf/autom4te.cache
 #==============================================================================#
 # External projects that are tracked independently.
 projects/*
-!projects/sample
+#!projects/sample
 !projects/CMakeLists.txt
 !projects/Makefile
 # Clang, which is tracked independently.
 tools/clang
 # LLDB, which is tracked independently.
 tools/lldb
+
+Release/
+Release+Asserts/
+Debug/
+Debug+Asserts/
+*.inc
+*.swp
+CommandGuide/
+*.config
+*.tar.gz
+config.log
+config.status
+docs/ocamldoc/
+docs/doxygen.cfg
+include/llvm/Config/AsmParsers.def
+include/llvm/Config/AsmPrinters.def
+include/llvm/Config/Disassemblers.def
+include/llvm/Config/Targets.def
+include/llvm/Config/config.h
+include/llvm/Config/llvm-config.h
+include/llvm/Intrinsics.gen
+include/llvm/System/DataTypes.h
+include/llvm/Support/DataTypes.h
+llvm.spec
+tools/llvm-config/FinalLibDeps.txt
+tools/llvm-config/LibDeps.txt
+tools/llvm-config/LibDeps.txt.tmp
+tools/llvm-config/llvm-config.in
+tools/llvmc/src/Base.td
