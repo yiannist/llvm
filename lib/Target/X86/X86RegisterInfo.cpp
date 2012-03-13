@@ -230,15 +230,19 @@ const uint16_t *
 X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   bool callsEHReturn = false;
   bool ghcCall = false;
+  bool hipeCall = false;
 
   if (MF) {
     callsEHReturn = MF->getMMI().callsEHReturn();
     const Function *F = MF->getFunction();
     ghcCall = (F ? F->getCallingConv() == CallingConv::GHC : false);
+    hipeCall = (F ? F->getCallingConv() == CallingConv::HiPE : false);
   }
 
   if (ghcCall)
     return CSR_Ghc_SaveList;
+  if (hipeCall)
+    return CSR_Hipe_SaveList;
   if (Is64Bit) {
     if (IsWin64)
       return CSR_Win64_SaveList;
@@ -255,6 +259,8 @@ const uint32_t*
 X86RegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
   if (CC == CallingConv::GHC)
     return CSR_Ghc_RegMask;
+  if (CC == CallingConv::HiPE)
+    return CSR_Hipe_RegMask;
   if (!Is64Bit)
     return CSR_32_RegMask;
   if (IsWin64)

@@ -1728,7 +1728,8 @@ CreateCopyOfByValArgument(SDValue Src, SDValue Dst, SDValue Chain,
 /// IsTailCallConvention - Return true if the calling convention is one that
 /// supports tail call optimization.
 static bool IsTailCallConvention(CallingConv::ID CC) {
-  return (CC == CallingConv::Fast || CC == CallingConv::GHC);
+  return (CC == CallingConv::Fast || CC == CallingConv::GHC ||
+	  CC == CallingConv::HiPE);
 }
 
 bool X86TargetLowering::mayBeEmittedAsTailCall(CallInst *CI) const {
@@ -1815,7 +1816,7 @@ X86TargetLowering::LowerFormalArguments(SDValue Chain,
   bool IsWin64 = Subtarget->isTargetWin64();
 
   assert(!(isVarArg && IsTailCallConvention(CallConv)) &&
-         "Var args not supported with calling convention fastcc or ghc");
+         "Var args not supported with calling convention fastcc, ghc or hipe");
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -2155,7 +2156,7 @@ X86TargetLowering::LowerCall(SDValue Chain, SDValue Callee,
   }
 
   assert(!(isVarArg && IsTailCallConvention(CallConv)) &&
-         "Var args not supported with calling convention fastcc or ghc");
+         "Var args not supported with calling convention fastcc, ghc or hipe");
 
   // Analyze operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -2614,6 +2615,16 @@ X86TargetLowering::GetAlignedArgumentStackSize(unsigned StackSize,
   uint64_t AlignMask = StackAlignment - 1;
   int64_t Offset = StackSize;
   uint64_t SlotSize = TD->getPointerSize();
+
+  // HiPE: When compiling Erlang programs 32-bit architectures we do not need
+  //       such alignment.
+  // XXX: Maybe we need something like 8n+4 ?
+  const Function *CallerF = DAG.getMachineFunction().getFunction();
+  CallingConv::ID CallerCC = CallerF->getCallingConv();
+
+  if ( (CallerCC == CallingConv::HiPE) && (SlotSize == 4) )
+    return StackSize;
+
   if ( (Offset & AlignMask) <= (StackAlignment - SlotSize) ) {
     // Number smaller than 12 so just add the difference.
     Offset += ((StackAlignment - SlotSize) - (Offset & AlignMask));
@@ -3028,6 +3039,10 @@ bool X86::isCalleePop(CallingConv::ID CallingConv,
     return TailCallOpt;
   case CallingConv::GHC:
     return TailCallOpt;
+  case CallingConv::HiPE:
+    return true; // TailCallOpt doesn't fit our case because Erlang/OTP
+                 // x86/amd64 ABI cleary specifies that 'callee pops
+                 // arguments' *every* time a call returns.
   }
 }
 
