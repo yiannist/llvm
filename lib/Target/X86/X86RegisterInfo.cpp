@@ -198,6 +198,11 @@ X86RegisterInfo::getPointerRegClass(const MachineFunction &MF, unsigned Kind)
       return &X86::GR64_TCW64RegClass;
     if (TM.getSubtarget<X86Subtarget>().is64Bit())
       return &X86::GR64_TCRegClass;
+
+    const Function *F = MF.getFunction();
+    bool isHipeCall = (F ? F->getCallingConv() == CallingConv::HiPE : false);
+    if (isHipeCall)
+      return &X86::GR32RegClass;
     return &X86::GR32_TCRegClass;
   }
 }
@@ -237,14 +242,16 @@ const uint16_t *
 X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
   bool callsEHReturn = false;
   bool ghcCall = false;
+  bool hipeCall = false;
 
   if (MF) {
     callsEHReturn = MF->getMMI().callsEHReturn();
     const Function *F = MF->getFunction();
     ghcCall = (F ? F->getCallingConv() == CallingConv::GHC : false);
+    hipeCall = (F ? F->getCallingConv() == CallingConv::HiPE : false);
   }
 
-  if (ghcCall)
+  if (ghcCall || hipeCall)
     return CSR_NoRegs_SaveList;
   if (Is64Bit) {
     if (IsWin64)
@@ -260,7 +267,7 @@ X86RegisterInfo::getCalleeSavedRegs(const MachineFunction *MF) const {
 
 const uint32_t*
 X86RegisterInfo::getCallPreservedMask(CallingConv::ID CC) const {
-  if (CC == CallingConv::GHC)
+  if (CC == CallingConv::GHC || CC == CallingConv::HiPE)
     return CSR_NoRegs_RegMask;
   if (!Is64Bit)
     return CSR_32_RegMask;

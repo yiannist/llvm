@@ -1751,7 +1751,8 @@ CreateCopyOfByValArgument(SDValue Src, SDValue Dst, SDValue Chain,
 /// IsTailCallConvention - Return true if the calling convention is one that
 /// supports tail call optimization.
 static bool IsTailCallConvention(CallingConv::ID CC) {
-  return (CC == CallingConv::Fast || CC == CallingConv::GHC);
+  return (CC == CallingConv::Fast || CC == CallingConv::GHC ||
+          CC == CallingConv::HiPE);
 }
 
 bool X86TargetLowering::mayBeEmittedAsTailCall(CallInst *CI) const {
@@ -1838,7 +1839,7 @@ X86TargetLowering::LowerFormalArguments(SDValue Chain,
   bool IsWin64 = Subtarget->isTargetWin64();
 
   assert(!(isVarArg && IsTailCallConvention(CallConv)) &&
-         "Var args not supported with calling convention fastcc or ghc");
+         "Var args not supported with calling convention fastcc, ghc or hipe");
 
   // Assign locations to all of the incoming arguments.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -2183,7 +2184,7 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   }
 
   assert(!(isVarArg && IsTailCallConvention(CallConv)) &&
-         "Var args not supported with calling convention fastcc or ghc");
+         "Var args not supported with calling convention fastcc, ghc or hipe");
 
   // Analyze operands of the call, assigning locations to each operand.
   SmallVector<CCValAssign, 16> ArgLocs;
@@ -2642,6 +2643,13 @@ X86TargetLowering::GetAlignedArgumentStackSize(unsigned StackSize,
   uint64_t AlignMask = StackAlignment - 1;
   int64_t Offset = StackSize;
   uint64_t SlotSize = TD->getPointerSize();
+  const Function *F = MF.getFunction();
+  bool isHipeCall = (F ? F->getCallingConv() == CallingConv::HiPE : false);
+
+  if ( isHipeCall && !Subtarget->is64Bit() )
+    // When compiling a HiPE function in X86 we do not need such alignment.
+    return StackSize;
+
   if ( (Offset & AlignMask) <= (StackAlignment - SlotSize) ) {
     // Number smaller than 12 so just add the difference.
     Offset += ((StackAlignment - SlotSize) - (Offset & AlignMask));
@@ -3060,6 +3068,10 @@ bool X86::isCalleePop(CallingConv::ID CallingConv,
     return TailCallOpt;
   case CallingConv::GHC:
     return TailCallOpt;
+  case CallingConv::HiPE:
+    // TailCallOpt doesn't fit our case because Erlang/OTP X86/AMD64 ABI cleary
+    // specifies that callee *always* pops the arguments.
+    return true;
   }
 }
 
