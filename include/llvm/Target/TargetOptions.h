@@ -52,7 +52,7 @@ namespace llvm {
           DisableJumpTables(false), EnableFastISel(false),
           PositionIndependentExecutable(false), EnableSegmentedStacks(false),
           UseInitArray(false), TrapFuncName(""), FloatABIType(FloatABI::Default),
-          AllowFPOpFusion(FPOpFusion::Standard)
+          AllowFPOpFusion(FPOpFusion::Standard), EnableHiPEPrologue(false)
     {}
 
     /// PrintMachineCode - This flag is enabled when the -print-machineinstrs
@@ -172,6 +172,11 @@ namespace llvm {
     unsigned PositionIndependentExecutable : 1;
 
     unsigned EnableSegmentedStacks : 1;
+
+    /// EnableHiPEPrologue - This flag indicates that the PrologEpilogInserter
+    /// should adjust a function's prologue by adding explicit calls to
+    /// "inc_stack_0" BIF to increase a function's stack, when needed.
+    unsigned EnableHiPEPrologue : 1;
 
     /// UseInitArray - Use .init_array instead of .ctors for static
     /// constructors.

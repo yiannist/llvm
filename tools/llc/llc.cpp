@@ -253,6 +253,11 @@ SegmentedStacks("segmented-stacks",
   cl::init(false));
 
 static cl::opt<bool>
+HiPEPrologue("enable-hipe-prologue",
+  cl::desc("Add HiPE custom prologue if needed."),
+  cl::init(false));
+
+static cl::opt<bool>
 UseInitArray("use-init-array",
   cl::desc("Use .init_array instead of .ctors."),
   cl::init(false));
@@ -430,6 +435,7 @@ int main(int argc, char **argv) {
   Options.TrapFuncName = TrapFuncName;
   Options.PositionIndependentExecutable = EnablePIE;
   Options.EnableSegmentedStacks = SegmentedStacks;
+  Options.EnableHiPEPrologue = HiPEPrologue;
   Options.UseInitArray = UseInitArray;
 
   std::auto_ptr<TargetMachine>
