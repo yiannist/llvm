@@ -350,7 +350,7 @@ def GR64_ABCD : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX, RBX)> {
                        (GR16_ABCD sub_16bit),
                        (GR32_ABCD sub_32bit)];
 }
-def GR32_TC   : RegisterClass<"X86", [i32], 32, (add EAX, ECX, EDX)> {
+def GR32_TC   : RegisterClass<"X86", [i32], 32, (add EAX, ECX, EDX, EBX, EDI)> {
   let SubRegClasses = [(GR8 sub_8bit, sub_8bit_hi), (GR16 sub_16bit)];
 }
 def GR64_TC   : RegisterClass<"X86", [i64], 64, (add RAX, RCX, RDX, RSI, RDI,
