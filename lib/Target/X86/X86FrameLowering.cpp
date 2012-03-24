@@ -1557,92 +1557,58 @@ X86FrameLowering::adjustForSegmentedStacks(MachineFunction &MF) const {
 //    push %rbp
 //    ...
 void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
-  MachineBasicBlock &MBB = MF.front(); // Prologue goes in entry BB.
-  MachineBasicBlock::iterator MBBI = MBB.begin();
+  MachineBasicBlock &prologueMBB = MF.front();
   MachineFrameInfo *MFI = MF.getFrameInfo();
-  const Function *Fn = MF.getFunction();
   const X86InstrInfo &TII = *TM.getInstrInfo();
-  uint64_t StackSize = MFI->getStackSize();    // Number of bytes to allocate.
   bool Is64Bit = STI.is64Bit();
-  MachineFunction::iterator MBBIter = MBB;     // Needed for adding HiPE
-                                               // prologue MBBs.
-  ++MBBIter;
-
   DebugLoc DL;
 
-  if (Fn->getCallingConv() == CallingConv::HiPE) {
-    const unsigned StkArity = computeStkArity(Fn->arg_size(), Is64Bit);
-    const unsigned WordSz = WordSize(Is64Bit);
-    const unsigned Guaranteed = (LeafWords - 1 - StkArity) * WordSz;
-    const unsigned MaxStack = StackSize + LeafWords * WordSz -
-      MFI->getMaxCallFrameSize();
+  if (MF.getFunction()->getCallingConv() == CallingConv::HiPE) {
+    const int WordSz = WordSize(Is64Bit);
+    const int Guaranteed = LeafWords * WordSz;
+    int MaxStack = MFI->getStackSize();
 
-    if (MaxStack > Guaranteed) {
-      /// First update the CFG
-      MachineBasicBlock *entryMBB = &MBB;
+    // Case of an MFA call
+    if (MFI->hasCalls())
+      MaxStack += (LeafWords + 2) * WordSz;
+    // Else (primitive or builtin call)
+    // MaxStack += 2 * WordSz;
+
+    if (MFI->hasCalls() && MaxStack > Guaranteed) {
       MachineBasicBlock *stackCheckMBB = MF.CreateMachineBasicBlock();
       MachineBasicBlock *incStackMBB = MF.CreateMachineBasicBlock();
-      MachineBasicBlock *newEntry = MF.CreateMachineBasicBlock();
+      MachineBasicBlock *newEntryMBB = MF.CreateMachineBasicBlock();
 
-      // Insert new blocks in current function's MachineBasicBlock iterator.
-      MF.insert(MBBIter, stackCheckMBB);
-      MF.insert(MBBIter, incStackMBB);
-      MF.insert(MBBIter, newEntry);
+      MF.push_front(incStackMBB);
+      MF.push_front(stackCheckMBB);
+      MF.push_front(newEntryMBB);
 
-      // Move BB from Entry to newEntry.
-      // (The first BB of every llvm function should begin with the Entry label
-      // and no jumps to that block are allowed.)
-      newEntry->splice(newEntry->begin(), entryMBB, entryMBB->begin(),
-                       entryMBB->end());
-
-      // Update the successors and PHI nodes of all MBBs that are created or
-      // changed.
-      newEntry->transferSuccessorsAndUpdatePHIs(entryMBB);
-
-      // Entry falls through StackCheck
-      entryMBB->addSuccessor(stackCheckMBB);
-
-      // StackCheck falls through IncStack or jumps to NewEntry
-      stackCheckMBB->addSuccessor(incStackMBB);
-      stackCheckMBB->addSuccessor(newEntry);
-
-      // IncStack jumps to StackCheck
-      incStackMBB->addSuccessor(stackCheckMBB);
-
-      // Create new Machine Basic Block for inc_stack check (stackCheckMBB)
-      MachineBasicBlock::iterator stackCheckMBBI = stackCheckMBB->begin();
       // Registers to use for the instructions:
-      const unsigned TempReg = Is64Bit ? X86::R14 : X86::EBX; // a temp register (temp0) not involved in Erlang CC
-      const unsigned StackPtrReg = Is64Bit ? X86::RSP : X86::ESP;
-      const unsigned ProcessPtrReg = Is64Bit ? X86::RBP : X86::EBP;
-      // lea -MaxStack(%rsp), %r14
+      // R14/EBX is a temp register, not used in Erlang Calling Convention.
+      const unsigned TempReg = Is64Bit ? X86::R14 : X86::EBX;
+      const unsigned SPReg   = Is64Bit ? X86::RSP : X86::ESP;
+      const unsigned PReg    = Is64Bit ? X86::RBP : X86::EBP;
+
+      // Create new MBB for stack check:
       unsigned Opc1 = Is64Bit ? X86::LEA64r : X86::LEA32r;
-      addRegOffset(BuildMI(*stackCheckMBB, stackCheckMBBI, DL, TII.get(Opc1),
-			   TempReg), StackPtrReg, false, -MaxStack);
-      // cmp SP_LIMIT(P), %r14
-      unsigned int Opc2 = Is64Bit ? X86::CMP64rm : X86::CMP32rm;
-      const unsigned SPLimitOff = Is64Bit ? 0x48 : 0x24; // Hardcoded in Erlang/OTP
-      addRegOffset(BuildMI(*stackCheckMBB, stackCheckMBBI, DL, TII.get(Opc2),
-			   TempReg), ProcessPtrReg, false, SPLimitOff);
-      // jae NewEntry
-      BuildMI(*stackCheckMBB, stackCheckMBBI, DL,
-	      TII.get(X86::JAE_4)).addMBB(newEntry);
+      addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(Opc1), TempReg),
+                   SPReg, false, -MaxStack);
+      unsigned Opc2 = Is64Bit ? X86::CMP64rm : X86::CMP32rm;
+      // SPLimitOff is in a fixed heap location (when not in reg)
+      const unsigned SPLimitOff = Is64Bit ? 0x48 : 0x24;
+      addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(Opc2), TempReg),
+                   PReg, false, SPLimitOff);
+      BuildMI(stackCheckMBB, DL, TII.get(X86::JAE_4)).addMBB(&prologueMBB);
 
-      // Create new MBB for inc_stack (IncStack)
-      MachineBasicBlock::iterator incStackMBBI = incStackMBB->begin();
-      // call inc_stack_0
+      // Create new MBB for inc_stack:
       unsigned CallOp = Is64Bit ? X86::CALL64pcrel32 : X86::CALLpcrel32;
-      BuildMI(*incStackMBB, incStackMBBI, DL,
-              TII.get(CallOp)).addExternalSymbol("inc_stack_0");
-      // jmp CheckStack
-      BuildMI(*incStackMBB, incStackMBBI, DL,
-	      TII.get(X86::JMP_4)).addMBB(stackCheckMBB);
+      BuildMI(incStackMBB, DL, TII.get(CallOp)).addExternalSymbol("inc_stack_0");
+      BuildMI(incStackMBB, DL, TII.get(X86::JMP_4)).addMBB(stackCheckMBB);
 
-      //DEBUG:
-      // for (MachineFunction::iterator i = MF.begin(), e = MF.end(); i != e; ++i)
-      //     errs() << "Basic block (name=" << i->getName() << ") has "
-      // 	     << i->size() << " instructions.\n" << *i << "\n";
-      // errs() << "\n\n";
+      incStackMBB->addSuccessor(stackCheckMBB);
+      stackCheckMBB->addSuccessor(incStackMBB, 1);
+      stackCheckMBB->addSuccessor(&prologueMBB, 99);
+      newEntryMBB->addSuccessor(stackCheckMBB);
     }
   }
 #ifdef XDEBUG
