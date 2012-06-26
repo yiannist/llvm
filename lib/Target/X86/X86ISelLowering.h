@@ -718,7 +718,8 @@ namespace llvm {
                                 int FPDiff, DebugLoc dl) const;
 
     unsigned GetAlignedArgumentStackSize(unsigned StackSize,
-                                         SelectionDAG &DAG) const;
+                                         SelectionDAG &DAG,
+                                         CallingConv::ID CallCC) const;
 
     std::pair<SDValue,SDValue> FP_TO_INTHelper(SDValue Op, SelectionDAG &DAG,
                                                bool isSigned,

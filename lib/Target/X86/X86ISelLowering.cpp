@@ -1938,7 +1938,7 @@ X86TargetLowering::LowerFormalArguments(SDValue Chain,
   // Align stack specially for tail calls.
   if (FuncIsMadeTailCallSafe(CallConv,
                              MF.getTarget().Options.GuaranteedTailCallOpt))
-    StackSize = GetAlignedArgumentStackSize(StackSize, DAG);
+    StackSize = GetAlignedArgumentStackSize(StackSize, DAG, CallConv);
 
   // If the function takes variable number of arguments, make a frame index for
   // the start of the first vararg value... for expansion of llvm.va_start.
@@ -2206,7 +2206,7 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
     NumBytes = 0;
   else if (getTargetMachine().Options.GuaranteedTailCallOpt &&
            IsTailCallConvention(CallConv))
-    NumBytes = GetAlignedArgumentStackSize(NumBytes, DAG);
+    NumBytes = GetAlignedArgumentStackSize(NumBytes, DAG, CallConv);
 
   int FPDiff = 0;
   if (isTailCall && !IsSibcall) {
@@ -2635,7 +2635,8 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
 /// for a 16 byte align requirement.
 unsigned
 X86TargetLowering::GetAlignedArgumentStackSize(unsigned StackSize,
-                                               SelectionDAG& DAG) const {
+                                               SelectionDAG& DAG,
+                                               CallingConv::ID CallCC) const {
   MachineFunction &MF = DAG.getMachineFunction();
   const TargetMachine &TM = MF.getTarget();
   const TargetFrameLowering &TFI = *TM.getFrameLowering();
@@ -2643,8 +2644,7 @@ X86TargetLowering::GetAlignedArgumentStackSize(unsigned StackSize,
   uint64_t AlignMask = StackAlignment - 1;
   int64_t Offset = StackSize;
   uint64_t SlotSize = TD->getPointerSize();
-  const Function *F = MF.getFunction();
-  bool isHipeCall = (F ? F->getCallingConv() == CallingConv::HiPE : false);
+  bool isHipeCall = CallCC == CallingConv::HiPE;
 
   if ( isHipeCall && !Subtarget->is64Bit() )
     // When compiling a HiPE function in X86 we do not need such alignment.

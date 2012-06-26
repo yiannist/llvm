@@ -200,8 +200,8 @@ X86RegisterInfo::getPointerRegClass(const MachineFunction &MF, unsigned Kind)
       return &X86::GR64_TCRegClass;
 
     const Function *F = MF.getFunction();
-    bool isHipeCall = (F ? F->getCallingConv() == CallingConv::HiPE : false);
-    if (isHipeCall)
+    bool isHipeCC = (F ? F->getCallingConv() == CallingConv::HiPE : false);
+    if (isHipeCC)
       return &X86::GR32RegClass;
     return &X86::GR32_TCRegClass;
   }
