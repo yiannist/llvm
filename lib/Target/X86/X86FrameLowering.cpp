@@ -1595,7 +1595,7 @@ void X86FrameLowering::adjustForHiPEPrologue(MachineFunction &MF) const {
                    SPReg, false, -MaxStack);
       unsigned Opc2 = Is64Bit ? X86::CMP64rm : X86::CMP32rm;
       // SPLimitOff is in a fixed heap location (when not in reg)
-      const unsigned SPLimitOff = Is64Bit ? 0x90 : 0x24;
+      const unsigned SPLimitOff = Is64Bit ? 0x90 : 0x4c;
       addRegOffset(BuildMI(stackCheckMBB, DL, TII.get(Opc2), TempReg),
                    PReg, false, SPLimitOff);
       BuildMI(stackCheckMBB, DL, TII.get(X86::JAE_4)).addMBB(&prologueMBB);
